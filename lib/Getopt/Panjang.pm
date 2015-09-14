@@ -265,10 +265,14 @@ sub get_options {
      $success ? "OK" : "Error in parsing",
      undef, {
          'func.remaining_argv' => \@remaining,
-         'func.unknown_opts' => \%unknown_opts,
-         'func.ambiguous_opts' => \%ambiguous_opts,
-         'func.val_missing_opts' => \%val_missing_opts,
-         'func.val_invalid_opts' => \%val_invalid_opts,
+         ('func.unknown_opts'     => \%unknown_opts    )
+             x (keys(%unknown_opts) ? 1:0),
+         ('func.ambiguous_opts'   => \%ambiguous_opts  )
+             x (keys(%ambiguous_opts) ? 1:0),
+         ('func.val_missing_opts' => \%val_missing_opts)
+             x (keys(%val_missing_opts) ? 1:0),
+         ('func.val_invalid_opts' => \%val_invalid_opts)
+             x (keys(%val_invalid_opts) ? 1:0),
     }];
 }
 
