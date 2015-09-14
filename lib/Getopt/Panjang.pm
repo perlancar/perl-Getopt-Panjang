@@ -38,6 +38,8 @@ If unspecified, will default to `@ARGV`.
 
 _
             schema => ['array*', of=>'str*'],
+            pos => 0,
+            greedy => 1,
         },
         spec => {
             summary => 'Options specification',
@@ -56,6 +58,7 @@ message to signify failed validation for the option value.
 
 _
             schema => ['hash*', values=>'code*'],
+            req => 1,
         },
     },
     result => {
