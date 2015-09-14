@@ -62,22 +62,32 @@ _
         description => <<'_',
 
 Will return 200 on parse success. If there is an error, like missing option
-value or unknown option, will return 4xx. The result metadata will contain more
+value or unknown option, will return 500. The result metadata will contain more
 information about the error.
 
 _
     },
 };
-
 sub get_options {
     my %args = @_;
 
-    my %unknown_opts;
-    my %missing_val;
-    my %invalid_val;
+    # XXX schema
+    my $argv;
+    if ($args{argv}) {
+        ref($args{argv}) eq 'ARRAY' or return [400, "argv is not an array"];
+        $argv = $args{argv};
+    } else {
+        $argv = \@ARGV;
+    }
+    my $spec = $args{spec};
+    ref($args{spec}) eq 'HASH' or return [400, "spec is not a hash"];
+    for (keys %$spec) {
+        return [400, "spec->{$_} is not a coderef"]
+            unless ref($spec->{$_}) eq 'CODE';
+    }
 
     my %spec_by_opt_name;
-    for (keys %spec) {
+    for (keys %$spec) {
         my $orig = $_;
         s/=[fios]\@?\z//;
         s/\|.+//;
@@ -88,9 +98,9 @@ sub get_options {
         my ($wanted, $short_mode) = @_;
         my @candidates;
       OPT_SPEC:
-        for my $spec (keys %spec) {
-            $spec =~ s/=[fios]\@?\z//;
-            my @opts = split /\|/, $spec;
+        for my $speckey (keys %$spec) {
+            $speckey =~ s/=[fios]\@?\z//;
+            my @opts = split /\|/, $speckey;
             for my $o (@opts) {
                 next if $short_mode && length($o) > 1;
                 if ($o eq $wanted) {
@@ -105,26 +115,41 @@ sub get_options {
             }
         }
         if (!@candidates) {
-            warn "Unknown option: $wanted\n";
-            $success = 0;
-            return undef; # means unknown
+            return [404, "Unknown option '$wanted'", undef,
+                    {'func.unknown_opt' => $wanted}];
         } elsif (@candidates > 1) {
-            warn "Option $wanted is ambiguous (" .
-                join(", ", @candidates) . ")\n";
-            $success = 0;
-            return ''; # means ambiguous
+            return [300, "Option '$wanted' is ambiguous", undef, {
+                'func.ambiguous_opt' => $wanted,
+                'func.ambiguous_candidates' => [sort @candidates],
+            }];
         }
-        return $candidates[0];
+        return [200, "OK", $candidates[0]];
     };
 
     my $code_set_val = sub {
         my $name = shift;
 
-        my $spec_key = $spec_by_opt_name{$name};
-        my $handler  = $spec{$spec_key};
+        my $speckey = $spec_by_opt_name{$name};
+        my $handler = $spec->{$speckey};
 
-        $handler->({name=>$name}, @_ ? $_[0] : 1);
+        eval {
+            $handler->(
+                name  => $name,
+                value => (@_ ? $_[0] : 1),
+            );
+        };
+        if ($@) {
+            return [400, "Invalid value for option '$name': $@", undef,
+                    {'func.val_invalid_opt' => $name}];
+        } else {
+            return [200];
+        }
     };
+
+    my %unknown_opts;
+    my %ambiguous_opts;
+    my %val_missing_opts;
+    my %val_invalid_opts;
 
     my $i = -1;
     my @remaining;
@@ -138,38 +163,50 @@ sub get_options {
         } elsif ($argv->[$i] =~ /\A--(.+?)(?:=(.*))?\z/) {
 
             my ($used_name, $val_in_opt) = ($1, $2);
-            my $opt = $code_find_opt->($used_name);
-            if (!defined($opt)) {
+            my $findres = $code_find_opt->($used_name);
+            if ($findres->[0] == 404) { # unknown opt
                 push @remaining, $argv->[$i];
+                $unknown_opts{ $findres->[3]{'func.unknown_opt'} }++;
                 next ELEM;
-            } elsif (!length($opt)) {
-                next ELEM; # ambiguous
+            } elsif ($findres->[0] == 300) { # ambiguous
+                $ambiguous_opts{ $findres->[3]{'func.ambiguous_opt'} } =
+                    $findres->[3]{'func.ambiguous_candidates'};
+                next ELEM;
+            } elsif ($findres->[0] != 200) {
+                return [500, "An unexpected error occurs", undef, {
+                    'func._find_opt_res' => $findres,
+                }];
             }
+            my $opt = $findres->[2];
 
-            my $spec = $spec_by_opt_name{$opt};
+            my $speckey = $spec_by_opt_name{$opt};
             # check whether option requires an argument
-            if ($spec =~ /=[fios]\@?\z/) {
+            if ($speckey =~ /=[fios]\@?\z/) {
                 if (defined $val_in_opt) {
                     # argument is taken after =
                     if (length $val_in_opt) {
-                        $code_set_val->($opt, $val_in_opt);
+                        my $setres = $code_set_val->($opt, $val_in_opt);
+                        $val_invalid_opts{$opt} = $setres->[1]
+                            unless $setres->[0] == 200;
                     } else {
-                        warn "Option $used_name requires an argument\n";
-                        $success = 0;
+                        $val_missing_opts{$used_name}++;
                         next ELEM;
                     }
                 } else {
                     if ($i+1 >= @$argv) {
                         # we are the last element
-                        warn "Option $used_name requires an argument\n";
-                        $success = 0;
+                        $val_missing_opts{$used_name}++;
                         last ELEM;
                     }
                     $i++;
-                    $code_set_val->($opt, $argv->[$i]);
+                    my $setres = $code_set_val->($opt, $argv->[$i]);
+                    $val_invalid_opts{$opt} = $setres->[1]
+                        unless $setres->[0] == 200;
                 }
             } else {
-                $code_set_val->($opt);
+                my $setres = $code_set_val->($opt);
+                $val_invalid_opts{$opt} = $setres->[1]
+                    unless $setres->[0] == 200;
             }
 
         } elsif ($argv->[$i] =~ /\A-(.*)/) {
@@ -178,29 +215,35 @@ sub get_options {
           SHORT_OPT:
             while ($str =~ s/(.)//) {
                 my $used_name = $1;
-                my $opt = $code_find_opt->($1, 'short');
-                next SHORT_OPT unless defined($opt) && length($opt);
+                my $findres = $code_find_opt->($1, 'short');
+                next SHORT_OPT unless $findres->[0] == 200;
+                my $opt = $findres->[2];
 
-                my $spec = $spec_by_opt_name{$opt};
+                my $speckey = $spec_by_opt_name{$opt};
                 # check whether option requires an argument
-                if ($spec =~ /=[fios]\@?\z/) {
+                if ($speckey =~ /=[fios]\@?\z/) {
                     if (length $str) {
                         # argument is taken from $str
-                        $code_set_val->($opt, $str);
+                        my $setres = $code_set_val->($opt, $str);
+                        $val_invalid_opts{$opt} = $setres->[1]
+                            unless $setres->[0] == 200;
                         next ELEM;
                     } else {
                         if ($i+1 >= @$argv) {
                             # we are the last element
-                            warn "Option $used_name requires an argument\n";
-                            $success = 0;
+                            $val_missing_opts{$used_name}++;
                             last ELEM;
                         }
                         # take the next element as argument
                         $i++;
-                        $code_set_val->($opt, $argv->[$i]);
+                        my $setres = $code_set_val->($opt, $argv->[$i]);
+                        $val_invalid_opts{$opt} = $setres->[1]
+                            unless $setres->[0] == 200;
                     }
                 } else {
-                    $code_set_val->($opt);
+                    my $setres = $code_set_val->($opt);
+                    $val_invalid_opts{$opt} = $setres->[1]
+                        unless $setres->[0] == 200;
                 }
             }
 
@@ -213,12 +256,20 @@ sub get_options {
     }
 
   RETURN:
-    splice @$argv, 0, ~~@$argv, @remaining; # replace with remaining elements
-    return $success;
-}
-
-sub GetOptions {
-    GetOptionsFromArray(\@ARGV, @_);
+    my $success =
+        !keys(%unknown_opts) &&
+        !keys(%ambiguous_opts) &&
+        !keys(%val_missing_opts) &&
+        !keys(%val_invalid_opts);
+    [$success ? 200 : 500,
+     $success ? "OK" : "Error in parsing",
+     undef, {
+         'func.remaining_argv' => \@remaining,
+         'func.unknown_opts' => \%unknown_opts,
+         'func.ambiguous_opts' => \%ambiguous_opts,
+         'func.val_missing_opts' => \%val_missing_opts,
+         'func.val_invalid_opts' => \%val_invalid_opts,
+    }];
 }
 
 1;
@@ -264,14 +315,24 @@ The interface differences with Getopt::Long:
 
 =over
 
-=item * There is only a single function
+=item * There is only a single function, and no default exports
 
 Getopt::Long has C<GetOptions>, C<GetOptionsFromArray>, C<GetOptionsFromString>.
-We only offer C<get_options>.
+We only offer C<get_options> which must be exported explicitly.
+
+=item * capitalization of function names
+
+Lowercase with underscores (C<get_options>) is used instead of camel case
+(C<GetOptions>).
 
 =item * C<get_options> accepts hash argument
 
 This future-proofs the function when we want to add more configuration.
+
+=item * option handler also accepts hash argument
+
+This future-proofs the handler when we want to give more arguments to the
+handler.
 
 =item * There are no globals
 
@@ -280,12 +341,11 @@ cleaner.
 
 =item * C<get_options> never dies, never prints warnings
 
-It only returns the detailed error structure so you can do something about it.
+It only returns the detailed error structure so you can do whatever about it.
 
-=item * capitalization of function names
+=item * C<get_options> never modifies argv/@ARGV
 
-Lowercase with underscores (C<get_options>) is used instead of camel case
-(C<GetOptions>).
+Remaining argv after parsing is returned in the result metadata.
 
 =back
 

@@ -12,73 +12,109 @@ my %r;
 subtest "basics" => sub {
     %r=(); test_getopt(
         name => 'case sensitive',
-        args => ["foo"=>sub{}],
-        argv => ["--Foo"],
-        success => 0,
+        args => {
+            spec=>{"foo"=>sub{}},
+            argv=>['--Foo'],
+        },
+        status => 500,
+        unknown_opts => {'Foo'=>1},
     );
     %r=(); test_getopt(
         name => 'empty argv',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => [],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec=>{"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv=>[],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => '-- (1)',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec=>{"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => '-- (2)',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--", "--foo"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec => {"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--", "--foo"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => ["--foo"],
     );
 
     %r=(); test_getopt(
         name => 'unknown argument -> error (1)',
-        args => ["bar=s"=>sub{$r{bar}=$_[1]}, "foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--bar", "--val", "--qux"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {bar=>"--val"}) },
+        args => {
+            spec => {"bar=s"=>sub{my %a=@_; $r{bar}=$a{value}},
+                     "foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--bar", "--val", "--qux"],
+        },
+        status => 500,
+        unknown_opts => {qux=>1},
+        posttest => sub { is_deeply(\%r, {bar=>"--val"}) },
         remaining => ["--qux"],
     );
     %r=(); test_getopt(
         name => 'unknown argument -> error (2)',
-        args => ["bar=s"=>sub{$r{bar}=$_[1]}, "foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--qux", "--bar", "--val"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {bar=>"--val"}) },
+        args => {
+            spec => {"bar=s"=>sub{my %a=@_; $r{bar}=$a{value}},
+                     "foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--qux", "--bar", "--val"],
+        },
+        status => 500,
+        posttest => sub { is_deeply(\%r, {bar=>"--val"}) },
         remaining => ["--qux"],
     );
     %r=(); test_getopt(
         name => 'prefix matching',
-        args => ["bar=s"=>sub{$r{bar}=$_[1]}],
-        argv => ["--ba", "--val"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {bar=>"--val"}) },
+        args => {
+            spec => {"bar=s"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["--ba", "--val"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {bar=>"--val"}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => 'ambiguous prefix -> error',
-        args => ["bar=s"=>sub{$r{bar}=$_[1]}, "baz=s"=>sub{$r{baz}=$_[1]}],
-        argv => ["--ba", "--val"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec => {"bar=s"=>sub{my %a=@_; $r{bar}=$a{value}},
+                     "baz=s"=>sub{my %a=@_; $r{baz}=$a{value}}},
+            argv => ["--ba", "--val"],
+        },
+        status => 500,
+        ambiguous_opts => {ba=>['bar', 'baz']},
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => ['--val'],
     );
     %r=(); test_getopt(
         name => 'missing required argument -> error',
-        args => ["bar=s"=>sub{$r{bar}=$_[1]}],
-        argv => ["--bar"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec => {"bar=s"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["--bar"],
+        },
+        status => 500,
+        val_missing_opts => {bar=>1},
+        posttest => sub { is_deeply(\%r, {}) },
+        remaining => [],
+    );
+    %r=(); test_getopt(
+        name => 'handler dies -> error',
+        args => {
+            spec => {"bar=s"=>sub{die "died\n"}},
+            argv => ["--bar", 1],
+        },
+        status => 500,
+        val_invalid_opts => {bar=>"Invalid value for option 'bar': died\n"},
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => [],
     );
 };
@@ -86,11 +122,14 @@ subtest "basics" => sub {
 subtest "type" => sub {
     %r=(); test_getopt(
         name => 'basics',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}, "bar=i"=>sub{$r{bar}=$_[1]},"baz=f"=>sub{$r{baz}=$_[1]},
-             ],
-        argv => ["--foo", 1, "--bar", 2, "--baz", 3],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>1, bar=>2, baz=>3}) },
+        args => {
+            spec => {"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}},
+                     "bar=i"=>sub{my %a=@_; $r{bar}=$a{value}},
+                     "baz=f"=>sub{my %a=@_; $r{baz}=$a{value}}},
+            argv => ["--foo", 1, "--bar", 2, "--baz", 3],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>1, bar=>2, baz=>3}) },
         remaining => [],
     );
 };
@@ -98,10 +137,12 @@ subtest "type" => sub {
 subtest "desttype" => sub {
     %r=(); test_getopt(
         name => 'basics',
-        args => ['foo=s@'=>sub{$r{foo} //= []; push @{$r{foo}}, $_[1]}],
-        argv => ["--foo", 2, "--foo", 1, "--foo", 3],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>[2,1,3]}) },
+        args => {
+            spec => {'foo=s@'=>sub{my %a=@_; $r{foo} //= []; push @{$r{foo}}, $a{value}}},
+            argv => ["--foo", 2, "--foo", 1, "--foo", 3],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>[2,1,3]}) },
         remaining => [],
     );
 };
@@ -109,18 +150,22 @@ subtest "desttype" => sub {
 subtest "gnu compat" => sub {
     %r=(); test_getopt(
         name => '(1)',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--foo=x", "y"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>"x"}) },
+        args => {
+            spec => {"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--foo=x", "y"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>"x"}) },
         remaining => ["y"],
     );
     %r=(); test_getopt(
         name => '(2)',
-        args => ["foo=s"=>sub{$r{foo}=$_[1]}],
-        argv => ["--foo=", "y"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {}) },
+        args => {
+            spec => {"foo=s"=>sub{my %a=@_; $r{foo}=$a{value}}},
+            argv => ["--foo=", "y"],
+        },
+        status => 500,
+        posttest => sub { is_deeply(\%r, {}) },
         remaining => ["y"],
     );
 };
@@ -128,34 +173,47 @@ subtest "gnu compat" => sub {
 subtest "bundling" => sub {
     %r=(); test_getopt(
         name => '(1)',
-        args => ["foo|f=s"=>sub{$r{foo}=$_[1]}, "bar|b"=>sub{$r{bar}=$_[1]}],
-        argv => ["-fb"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>"b"}) },
+        args => {
+            spec => {"foo|f=s"=>sub{my %a=@_; $r{foo}=$a{value}},
+                     "bar|b"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["-fb"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>"b"}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => '(2)',
-        args => ["foo|f=s"=>sub{$r{foo}=$_[1]}, "bar|b"=>sub{$r{bar}=$_[1]}],
-        argv => ["-bfb"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>"b", bar=>1}) },
+        args => {
+            spec => {"foo|f=s"=>sub{my %a=@_; $r{foo}=$a{value}},
+                     "bar|b"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["-bfb"],
+       },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>"b", bar=>1}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => 'option argument from next argument',
-        args => ["foo|f=s"=>sub{$r{foo}=$_[1]}, "bar|b"=>sub{$r{bar}=$_[1]}],
-        argv => ["-bf", "b"],
-        success => 1,
-        test_res => sub { is_deeply(\%r, {foo=>"b", bar=>1}) },
+        args => {
+            spec => {"foo|f=s"=>sub{my %a=@_; $r{foo}=$a{value}},
+                     "bar|b"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["-bf", "b"],
+        },
+        status => 200,
+        posttest => sub { is_deeply(\%r, {foo=>"b", bar=>1}) },
         remaining => [],
     );
     %r=(); test_getopt(
         name => 'missing required argument -> error',
-        args => ["foo|f=s"=>sub{$r{foo}=$_[1]}, "bar|b"=>sub{$r{bar}=$_[1]}],
-        argv => ["-bf"],
-        success => 0,
-        test_res => sub { is_deeply(\%r, {bar=>1}) },
+        args => {
+            spec => {"foo|f=s"=>sub{my %a=@_; $r{foo}=$a{value}},
+                     "bar|b"=>sub{my %a=@_; $r{bar}=$a{value}}},
+            argv => ["-bf"],
+        },
+        status => 500,
+        val_missing_opts => {f=>1},
+        posttest => sub { is_deeply(\%r, {bar=>1}) },
         remaining => [],
     );
 };
@@ -171,30 +229,35 @@ sub test_getopt {
     };
 
     subtest $name => sub {
-        my @argv = @{ $args{argv} };
-        my $res;
-        eval { $res = GetOptionsFromArray(\@argv, @{ $args{args} }) };
+        my $res = get_options(%{$args{args}});
 
-        if ($args{dies}) {
-            ok($@, "dies") or goto RETURN;
-        } else {
-            ok(!$@, "doesn't die") or do {
-                diag explain "err=$@";
-                goto RETURN;
-            };
-        }
-
-        if (defined($args{success})) {
-            is(!!$res, !!$args{success}, "success=$args{success}");
-        }
-
-        if ($args{test_res}) {
-            $args{test_res}->();
+        if (defined($args{status})) {
+            is($res->[0], $args{status}, "status=$args{status}");
         }
 
         if ($args{remaining}) {
-            is_deeply(\@argv, $args{remaining}, "remaining")
-                or diag explain \@argv;
+            is_deeply($res->[3]{'func.remaining_argv'}, $args{remaining}, "remaining")
+                or diag explain $res->[3]{'func.remaining_args'};
+        }
+        if ($args{ambiguous_opts}) {
+            is_deeply($res->[3]{'func.ambiguous_opts'}, $args{ambiguous_opts}, "ambiguous_opts")
+                or diag explain $res->[3]{'func.ambiguous_opts'};
+        }
+        if ($args{unknown_opts}) {
+            is_deeply($res->[3]{'func.unknown_opts'}, $args{unknown_opts}, "unknown_opts")
+                or diag explain $res->[3]{'func.unknown_opts'};
+        }
+        if ($args{val_missing_opts}) {
+            is_deeply($res->[3]{'func.val_missing_opts'}, $args{val_missing_opts}, "val_missing_opts")
+                or diag explain $res->[3]{'func.val_missing_opts'};
+        }
+        if ($args{val_invalid_opts}) {
+            is_deeply($res->[3]{'func.val_invalid_opts'}, $args{val_invalid_opts}, "val_invalid_opts")
+                or diag explain $res->[3]{'func.val_invalid_opts'};
+        }
+
+        if ($args{posttest}) {
+            $args{posttest}->();
         }
 
       RETURN:
