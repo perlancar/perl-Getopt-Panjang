@@ -349,8 +349,6 @@ Remaining argv after parsing is returned in the result metadata.
 
 =back
 
-=back
-
 Sample startup overhead benchmark:
 
 # COMMAND: perl devscripts/bench-startup 2>&1
