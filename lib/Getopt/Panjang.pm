@@ -277,6 +277,44 @@ sub get_options {
 
 =for Pod::Coverage .+
 
+=head1 SYNOPSIS
+
+ use Getopt::Panjang qw(get_options);
+
+ my $opts;
+ my $res = get_options(
+     # similar to Getopt::Long, except values must be coderef (handler), and
+     # handler receives hash argument
+     spec => {
+         'foo'   => sub { $opts->{foo} = 1 },
+         'bar=s' => sub { my %a = @_; $opts->{bar} = $a{value} },
+     },
+     argv => ["--bar", 1, "--foo"], # defaults to @ARGV
+ );
+
+ if ($res->[0] == 200) {
+     # do stuffs with parsed options, $opts
+ } else {
+    warn "Can't parse command-line options";
+    if ($res->[3]{'func.unknown_opts'}) {
+        warn "There are some unknown options: ",
+            join(",", keys %{$res->[3]{'func.unknown_opts'}});
+    }
+    if ($res->[3]{'func.ambiguous_opts'}) {
+        warn "There are some ambiguous options: ",
+            join(",", keys %{$res->[3]{'func.ambiguous_opts'}});
+    }
+    if ($res->[3]{'func.val_missing_opts'}) {
+        warn "There are some options which miss values: ",
+            join(",", keys %{$res->[3]{'func.val_missing_opts'}});
+    }
+    if ($res->[3]{'func.val_invalid_opts'}) {
+        warn "There are some options with invalid values: ",
+            join(",", keys %{$res->[3]{'func.val_invalid_opts'}});
+    }
+ }
+
+
 =head1 DESCRIPTION
 
 B<EXPERIMENTAL WORK>.
