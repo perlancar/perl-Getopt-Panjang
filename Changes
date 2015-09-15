@@ -16,8 +16,6 @@ Revision history for Getopt-Panjang
 
 0.02    2015-09-15 (PERLANCAR)
 
-	- No functional changes.
-
         - [ux] Don't set error information func.*_opts if there is no
 	  corresponding error.
 
