@@ -259,23 +259,45 @@ sub get_options {
     }
 
   RETURN:
-    my $success =
-        !keys(%unknown_opts) &&
-        !keys(%ambiguous_opts) &&
-        !keys(%val_missing_opts) &&
-        !keys(%val_invalid_opts);
-    [$success ? 200 : 500,
-     $success ? "OK" : "Error in parsing",
-     undef, {
-         'func.remaining_argv' => \@remaining,
-         ('func.unknown_opts'     => \%unknown_opts    )
-             x (keys(%unknown_opts) ? 1:0),
-         ('func.ambiguous_opts'   => \%ambiguous_opts  )
-             x (keys(%ambiguous_opts) ? 1:0),
-         ('func.val_missing_opts' => \%val_missing_opts)
-             x (keys(%val_missing_opts) ? 1:0),
-         ('func.val_invalid_opts' => \%val_invalid_opts)
-             x (keys(%val_invalid_opts) ? 1:0),
+    my ($status, $msg);
+    if (!keys(%unknown_opts) && !keys(%ambiguous_opts) &&
+            !keys(%val_missing_opts) && !keys(%val_invalid_opts)) {
+        $status = 200;
+        $msg = "OK";
+    } else {
+        $status = 500;
+        my @errs;
+        if (keys %unknown_opts) {
+            push @errs, "Unknown option" .
+                (keys(%unknown_opts) > 1 ? "s ":" ") .
+                join(", ", map {"'$_'"} sort keys %unknown_opts);
+        }
+        for (sort keys %ambiguous_opts) {
+            push @errs, "Ambiguous option '$_' (" .
+                join("/", @{$ambiguous_opts{$_}}) . "?)";
+        }
+        if (keys %val_missing_opts) {
+            push @errs, "Missing required value for option" .
+                (keys(%val_missing_opts) > 1 ? "s ":" ") .
+                join(", ", map {"'$_'"} sort keys %val_missing_opts);
+        }
+        for (keys %val_invalid_opts) {
+            push @errs, "Invalid value for option '$_': " .
+                $val_invalid_opts{$_};
+        }
+        $msg = (@errs > 1 ? "Errors in parsing command-line options: " : "").
+            join("; ", @errs);
+    }
+    [$status, $msg, undef, {
+        'func.remaining_argv' => \@remaining,
+        ('func.unknown_opts'     => \%unknown_opts    )
+            x (keys(%unknown_opts) ? 1:0),
+        ('func.ambiguous_opts'   => \%ambiguous_opts  )
+            x (keys(%ambiguous_opts) ? 1:0),
+        ('func.val_missing_opts' => \%val_missing_opts)
+            x (keys(%val_missing_opts) ? 1:0),
+        ('func.val_invalid_opts' => \%val_invalid_opts)
+            x (keys(%val_invalid_opts) ? 1:0),
     }];
 }
 
@@ -303,23 +325,7 @@ sub get_options {
  if ($res->[0] == 200) {
      # do stuffs with parsed options, $opts
  } else {
-    warn "Can't parse command-line options";
-    if ($res->[3]{'func.unknown_opts'}) {
-        warn "There are some unknown options: ",
-            join(",", keys %{$res->[3]{'func.unknown_opts'}});
-    }
-    if ($res->[3]{'func.ambiguous_opts'}) {
-        warn "There are some ambiguous options: ",
-            join(",", keys %{$res->[3]{'func.ambiguous_opts'}});
-    }
-    if ($res->[3]{'func.val_missing_opts'}) {
-        warn "There are some options which miss values: ",
-            join(",", keys %{$res->[3]{'func.val_missing_opts'}});
-    }
-    if ($res->[3]{'func.val_invalid_opts'}) {
-        warn "There are some options with invalid values: ",
-            join(",", keys %{$res->[3]{'func.val_invalid_opts'}});
-    }
+     die $res->[1];
  }
 
 Sample success result when C<@ARGV> is C<< ["--baz", 1, "--bar"] >>:
@@ -330,7 +336,7 @@ Sample error result (ambiguous option) when C<@ARGV> is C<< ["--ba", 1] >>:
 
  [
    500,
-   "Error in parsing",
+   "Ambiguous option 'ba' (bar/baz?)",
    undef,
    {
      "func.ambiguous_opts" => { ba => ["bar", "baz"] },
@@ -343,7 +349,7 @@ Sample error result (option with missing value) when C<@ARGV> is C<< ["--bar",
 
 [
    500,
-   "Error in parsing",
+   "Missing required value for option 'baz'",
    undef,
    {
      "func.remaining_argv"   => [],
@@ -355,7 +361,7 @@ Sample error result (unknown option) when C<@ARGV> is C<< ["--foo", "--qux"] >>:
 
  [
     500,
-   "Error in parsing",
+   "Unknown options 'foo', 'qux'",
    undef,
    {
      "func.remaining_argv" => ["--foo", "--qux"],
@@ -368,7 +374,7 @@ when C<@ARGV> is C<< ["--err", 1] >>:
 
  [
    500,
-   "Error in parsing",
+   "Invalid value for option 'err': Invalid value for option 'err': Bzzt\n",
    undef,
    {
      "func.remaining_argv"   => [],
