@@ -293,10 +293,11 @@ sub get_options {
      # similar to Getopt::Long, except values must be coderef (handler), and
      # handler receives hash argument
      spec => {
-         'foo'   => sub { $opts->{foo} = 1 },
-         'bar=s' => sub { my %a = @_; $opts->{bar} = $a{value} },
+         'bar'   => sub { $opts->{bar} = 1 },
+         'baz=s' => sub { my %a = @_; $opts->{baz} = $a{value} },
+         'err=s' => sub { die "Bzzt\n" },
      },
-     argv => ["--bar", 1, "--foo"], # defaults to @ARGV
+     argv => ["--baz", 1, "--bar"], # defaults to @ARGV
  );
 
  if ($res->[0] == 200) {
@@ -320,6 +321,60 @@ sub get_options {
             join(",", keys %{$res->[3]{'func.val_invalid_opts'}});
     }
  }
+
+Sample success result when C<@ARGV> is C<< ["--baz", 1, "--bar"] >>:
+
+ [200, "OK", undef, { "func.remaining_argv" => [] }]
+
+Sample error result (ambiguous option) when C<@ARGV> is C<< ["--ba", 1] >>:
+
+ [
+   500,
+   "Error in parsing",
+   undef,
+   {
+     "func.ambiguous_opts" => { ba => ["bar", "baz"] },
+     "func.remaining_argv" => [1],
+   },
+ ]
+
+Sample error result (option with missing value) when C<@ARGV> is C<< ["--bar",
+"--baz"] >>:
+
+[
+   500,
+   "Error in parsing",
+   undef,
+   {
+     "func.remaining_argv"   => [],
+     "func.val_missing_opts" => { baz => 1 },
+   },
+ ]
+
+Sample error result (unknown option) when C<@ARGV> is C<< ["--foo", "--qux"] >>:
+
+ [
+    500,
+   "Error in parsing",
+   undef,
+   {
+     "func.remaining_argv" => ["--foo", "--qux"],
+     "func.unknown_opts"   => { foo => 1, qux => 1 },
+   },
+ ]
+
+Sample error result (option with invalid value where the option handler dies)
+when C<@ARGV> is C<< ["--err", 1] >>:
+
+ [
+   500,
+   "Error in parsing",
+   undef,
+   {
+     "func.remaining_argv"   => [],
+     "func.val_invalid_opts" => { err => "Invalid value for option 'err': Bzzt\n" },
+   },
+ ]
 
 
 =head1 DESCRIPTION
