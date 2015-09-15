@@ -82,7 +82,7 @@ sub get_options {
     } else {
         $argv = \@ARGV;
     }
-    my $spec = $args{spec};
+    my $spec = $args{spec} or return [400, "Please specify spec"];
     ref($args{spec}) eq 'HASH' or return [400, "spec is not a hash"];
     for (keys %$spec) {
         return [400, "spec->{$_} is not a coderef"]
