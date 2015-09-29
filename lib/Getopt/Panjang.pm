@@ -389,7 +389,7 @@ B<EXPERIMENTAL WORK>.
 
 This module is similar to L<Getopt::Long>, but with a rather different
 interface. After experimenting with L<Getopt::Long::Less> and
-L<Getopt::Long::EvenLess> (which offers interface compatibility with
+L<Getopt::Long::EvenLess> (both of which offer interface compatibility with
 Getopt::Long), I'm now trying a different interface which will enable me to
 "clean up" or do "more advanced" stuffs.
 
@@ -447,11 +447,12 @@ cleaner.
 
 =item * C<get_options> never dies, never prints warnings
 
-It only returns the detailed error structure so you can do whatever about it.
+It only returns the detailed error structure so you can do whatever with it.
 
-=item * C<get_options> never modifies argv/@ARGV
+=item * C<get_options> never modifies argv/C<@ARGV>
 
-Remaining argv after parsing is returned in the result metadata.
+Remaining C<argv> after parsing is returned in the result metadata (as
+C<func.remaining_argv>).
 
 =back
 
