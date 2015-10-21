@@ -347,7 +347,7 @@ Sample error result (ambiguous option) when C<@ARGV> is C<< ["--ba", 1] >>:
 Sample error result (option with missing value) when C<@ARGV> is C<< ["--bar",
 "--baz"] >>:
 
-[
+ [
    500,
    "Missing required value for option 'baz'",
    undef,
